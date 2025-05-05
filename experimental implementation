@@ -1,0 +1,769 @@
+import pandas as pd
+data = pd.read_csv("/kaggle/input/thesis/loan.csv")
+data.head()
+!pip install -U tensorflow
+!pip install -U scikeras
+!pip install --upgrade scikit-learn
+!pip install --upgrade eli5
+
+del_columns = []
+for col in data.columns:
+    if (data[col].isnull().sum() / len(data) * 100) > 90:
+        del_columns.append(col)
+
+data = data.drop(columns=del_columns)
+id_columns = ["id", "member_id"]
+data = data.drop(columns=id_columns)
+
+feat_arr = ["addr_state", "zip_code"]
+print(data[feat_arr].describe())
+for col in feat_arr:
+    print(f"missing % {col}:", data[col].isnull().sum() / len(data) * 100)
+
+data["2_digit_zip"] = data["zip_code"].apply(lambda x: int(x[:2]))
+data = data.drop(columns=["addr_state", "zip_code"])
+
+feat_arr_num = ["annual_inc"]
+feat_arr_cat = ["verification_status", "emp_length", "emp_title"]
+print(data[feat_arr_num].describe())
+print(data[feat_arr_cat].describe())
+for col in feat_arr_num+feat_arr_cat:
+    print(f"missing % {col}:", data[col].isnull().sum() / len(data) * 100)
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import LabelEncoder
+from datetime import datetime
+def clean_emp_length(x):
+    if pd.isna(x):
+        return None
+    elif isinstance(x, float):
+        return None  # Handle float values by returning None
+    elif x.strip().lower() == "< 1 year":
+        return 0
+    elif x.strip().lower() == "1 year":
+        return 1
+    elif x.strip().lower() == "10+ years":
+        return 11
+    else:
+        return int(x.rstrip("years").strip())
+
+
+data["emp_length"] = data["emp_length"].apply(clean_emp_length)
+data["emp_length"] = data["emp_length"].fillna(value=data["emp_length"].mean())
+
+data["annual_inc"] = data["annual_inc"].fillna(value=data["annual_inc"].mean())
+
+le = LabelEncoder()
+data['verification_status'] = le.fit_transform(data['verification_status'])
+
+data = data.drop(columns=["emp_title"])
+feat_arr_cat = ["purpose", "initial_list_status", "issue_d"]
+print(data[feat_arr_cat].describe())
+for col in feat_arr_cat:
+    print(f"missing % {col}:", data[col].isnull().sum() / len(data) * 100)
+le = LabelEncoder()
+data['purpose'] = le.fit_transform(data['purpose'])
+data['initial_list_status'] = le.fit_transform(data['initial_list_status'])
+
+def compute_time_since(x):
+    if pd.isna(x): return None
+    given_date = datetime.strptime(x, "%b-%Y")
+    current_date = datetime.now()
+    return (current_date - given_date).days / 365.25
+
+data["issue_d"] = data["issue_d"].apply(compute_time_since)
+
+data = data.drop(columns=["desc", "title", "url", "policy_code", "application_type"])
+feat_arr_num = ["loan_amnt", "int_rate", "installment", "funded_amnt", "funded_amnt_inv",
+"total_pymnt", "total_pymnt_inv", "last_pymnt_amnt", "total_rec_late_fee"]
+data[feat_arr_num].describe()
+feat_arr_cat = ["term", "last_pymnt_d"]
+data[feat_arr_cat].describe()
+for col in feat_arr_cat+feat_arr_num:
+    print(f"missing % {col}:", data[col].isnull().sum() / len(data) * 100)
+le = LabelEncoder()
+data['term'] = le.fit_transform(data['term'])
+
+data["last_pymnt_d"] = data["last_pymnt_d"].apply(compute_time_since)
+data["last_pymnt_d"] = data["last_pymnt_d"].fillna(value=data["last_pymnt_d"].mean())
+
+data = data.drop(columns=["total_rec_int", "total_rec_prncp", "out_prncp", "out_prncp_inv", "pymnt_plan"])
+
+feat_arr_num = ["dti","earliest_cr_line","delinq_2yrs","collections_12_mths_ex_med",
+"inq_last_6mths","total_rev_hi_lim","acc_now_delinq","tot_coll_amt","tot_cur_bal",
+"last_credit_pull_d","open_acc","total_acc","mths_since_last_delinq",
+"mths_since_last_major_derog","mths_since_last_record","pub_rec","revol_bal","revol_util"]
+data[feat_arr_num].describe()
+feat_arr_cat = ["earliest_cr_line", "last_credit_pull_d"]
+data[feat_arr_cat].describe()
+for col in feat_arr_cat+feat_arr_num:
+    print(f"missing % {col}:", data[col].isnull().sum() / len(data) * 100)
+data["earliest_cr_line"] = data["earliest_cr_line"].apply(compute_time_since)
+data["last_credit_pull_d"] = data["last_credit_pull_d"].apply(compute_time_since)
+
+data[feat_arr_num] = data[feat_arr_num].fillna(data[feat_arr_num].mean())
+data[feat_arr_cat] = data[feat_arr_cat].fillna(data[feat_arr_cat].mean())
+
+le = LabelEncoder()
+data['grade'] = le.fit_transform(data['grade'])
+data['sub_grade'] = le.fit_transform(data['sub_grade'])
+le = LabelEncoder()
+data['home_ownership'] = le.fit_transform(data['home_ownership'])
+
+sns.countplot(data=data, y="loan_status")
+def binarize_target(loan_status):
+    cat_0_words = ["paid", "current"]
+    cat_1_words = ["charged off", "late", "default", "grace period"]
+    for word in cat_0_words:
+        if loan_status.lower().find(word)!=-1: return 0
+    for word in cat_1_words:
+        if loan_status.lower().find(word)!=-1: return 1
+    return -1
+
+data["target"] = data["loan_status"].apply(binarize_target)
+data = data[data["target"]!=-1]
+sns.countplot(data=data, y="target")
+X = data.drop(columns=["loan_status", "target"])
+y = data[["target"]]
+
+from sklearn.preprocessing import LabelEncoder
+import pandas as pd
+
+# Check if 'date_column' exists in X_train
+if 'next_pymnt_d' in X.columns:
+    # Convert date columns
+    X['next_pymnt_d'] = pd.to_datetime(X['next_pymnt_d'])
+    X['year'] = X['next_pymnt_d'].dt.year
+    X['month'] = X['next_pymnt_d'].dt.month
+    X['day'] = X['next_pymnt_d'].dt.day
+    X = X.drop(columns=['next_pymnt_d'])
+else:
+    print("Column 'date_column' not found in X_train.")
+
+# Convert categorical columns using LabelEncoder
+label_encoders = {}
+non_numeric_columns = X.select_dtypes(exclude=['number']).columns # Get non-numeric columns
+for col in non_numeric_columns:
+    le = LabelEncoder()
+    X[col] = le.fit_transform(X[col])
+    label_encoders[col] = le
+
+print(X.dtypes)
+import numpy as np
+from sklearn.model_selection import KFold
+from sklearn.metrics import accuracy_score
+kf = KFold(n_splits=20, shuffle=True, random_state=42)
+from sklearn.impute import SimpleImputer
+
+imputer = SimpleImputer(strategy='mean')  
+X_imputed = imputer.fit_transform(X)
+
+X_imputed = pd.DataFrame(X_imputed, columns=X.columns)
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, roc_curve, auc
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, roc_curve, auc
+# Light BGM
+
+from sklearn.metrics import accuracy_score, f1_score, precision_score 
+import lightgbm as lgb
+lgb_best_accuracy = 0 
+lgb_best_model = None
+
+fold = 1
+for train_index, test_index in kf.split(X_imputed):
+    X_train, X_test = X_imputed.iloc[train_index], X_imputed.iloc[test_index]
+    y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+    
+    # Initialize and train the LightGBM model
+    train_data = lgb.Dataset(X_train, label=y_train)
+    params = {'objective': 'binary', 'metric': 'binary_logloss'}
+    lgb_model = lgb.train(params, train_data)
+    
+    # Predict and evaluate
+    y_pred = lgb_model.predict(X_test)
+    y_pred_binary = [1 if pred >= 0.5 else 0 for pred in y_pred]
+    
+    accuracy = accuracy_score(y_test, y_pred_binary)
+    
+    if accuracy > lgb_best_accuracy:
+        lgb_best_accuracy = accuracy
+        lgb_best_model = lgb_model
+
+    print(f"Fold {fold} - Accuracy: {accuracy:.4f}")
+    fold += 1
+
+print(f"\nBest Accuracy: {lgb_best_accuracy:.4f}")
+
+
+y_pred_lgb = lgb_best_model.predict(X_test)
+y_pred_binary_lgb = [1 if pred >= 0.5 else 0 for pred in y_pred]
+
+
+accuracy_lgb = accuracy_score(y_test, y_pred_binary_lgb) 
+f1_lgb = f1_score(y_test, y_pred_binary_lgb, average='weighted') 
+precision_lgb = precision_score(y_test, y_pred_binary_lgb, average='weighted')
+
+print(accuracy_lgb)
+print(f1_lgb)
+print(precision_lgb)
+# = lgbm_clf.predict_proba(X_test)[:, 1]
+roc_auc = roc_auc_score(y_test, y_pred_lgb)
+print(f"ROC AUC Score of Light Gradient Boosting Machine: {roc_auc:.4f}")
+
+fpr, tpr, _ = roc_curve(y_test, y_pred_lgb)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.legend(loc="lower right")
+plt.show()
+
+# Adaptive Boosting
+from sklearn.ensemble import AdaBoostClassifier 
+from sklearn.tree import DecisionTreeClassifier
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.2, random_state=42)
+base_estimator = DecisionTreeClassifier(max_depth=1)
+ada_model = AdaBoostClassifier(base_estimator=base_estimator, n_estimators=50, learning_rate=1.0, random_state=42)
+
+
+ada_model.fit(X_train, y_train)
+
+
+y_pred_best_adb = ada_model.predict(X_test)
+adb_accuracy_best = accuracy_score(y_test, y_pred_best_adb)
+adb_f1_best = f1_score(y_test, y_pred_best_adb, average='weighted')
+adb_precision_best = precision_score(y_test, y_pred_best_adb, average='weighted')
+adb_roc_auc = roc_auc_score(y_test, y_pred_best_adb)
+
+
+print(adb_accuracy_best)
+print(adb_f1_best)
+print(adb_precision_best)
+print(adb_roc_auc)
+fpr_adb, tpr_adb, _ = roc_curve(y_test, y_pred_best_adb)
+roc_auc_adb = auc(fpr_adb, tpr_adb)
+
+plt.figure()
+plt.plot(fpr_adb, tpr_adb, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc_adb:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of AdaBoost')
+plt.legend(loc="lower right")
+plt.show()
+
+# Decision Tree
+from sklearn.metrics import accuracy_score, precision_score, classification_report
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.2, random_state=42)
+dt_model = DecisionTreeClassifier(random_state=42)
+dt_model.fit(X_train, y_train)
+y_pred_dt = dt_model.predict(X_test)
+
+dt_accuracy = accuracy_score(y_test, y_pred_dt)
+dt_f1 = f1_score(y_test, y_pred_dt, average='weighted')
+dt_precision = precision_score(y_test, y_pred_dt, average='weighted')
+dt_roc_auc = roc_auc_score(y_test, y_pred_dt)
+
+print(dt_accuracy)
+print(dt_f1)
+print(dt_precision)
+print(dt_roc_auc)
+fpr_dt, tpr_dt, _ = roc_curve(y_test, y_pred_dt)
+roc_auc_dt = auc(fpr_dt, tpr_dt)
+
+plt.figure()
+plt.plot(fpr_dt, tpr_dt, color='darkorange', lw=2, label=f'ROC curve of Decision Tree (area = {dt_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Decision Tree')
+plt.legend(loc="lower right")
+plt.show()
+
+# Random Forest
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.2, random_state=131543)
+
+rf = RandomForestClassifier(
+    n_estimators=500,
+    criterion='gini',
+    max_depth=5,
+    min_samples_split=2,
+    min_samples_leaf=1,
+    max_leaf_nodes=None,
+    bootstrap=True,
+    oob_score=False,
+    random_state=131543,
+    n_jobs=-1,
+    warm_start=False,
+    class_weight="balanced"
+)
+
+rf.fit(X_train, y_train.values.ravel())
+y_pred_rf = rf.predict(X_test)
+
+rf_accuracy = accuracy_score(y_test, y_pred_rf)
+rf_f1 = f1_score(y_test, y_pred_rf, average='weighted')
+rf_precision = precision_score(y_test, y_pred_rf, average='weighted')
+rf_roc_auc = roc_auc_score(y_test, y_pred_rf)
+
+print(rf_accuracy)
+print(rf_f1)
+print(rf_precision)
+print(rf_roc_auc)
+fpr_rf, tpr_rf, _ = roc_curve(y_test, y_pred_rf)
+roc_auc_rf = auc(fpr_rf, tpr_rf)
+
+plt.figure()
+plt.plot(fpr_rf, tpr_rf, color='darkorange', lw=2, label=f'ROC curve of Random Forest (area = {rf_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Random Forest')
+plt.legend(loc="lower right")
+plt.show()
+
+# Logistic Regression
+from sklearn.linear_model import LogisticRegression
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+
+model_lr = LogisticRegression(max_iter=1000)
+model_lr.fit(X_train, y_train)
+
+y_pred_lr = model_lr.predict(X_test)
+
+# Calculate metrics
+accuracy_lr = accuracy_score(y_test, y_pred_lr)
+precision_lr = precision_score(y_test, y_pred_lr, average='weighted')
+recall_lr = recall_score(y_test, y_pred_lr, average='weighted')
+lr_roc_auc = roc_auc_score(y_test, y_pred_lr)
+
+print(f"Accuracy: {accuracy_lr:.4f}")
+print(f"Precision: {precision_lr:.4f}")
+print(f"Recall: {recall_lr:.4f}")
+
+print(lr_roc_auc)
+
+fpr_lr, tpr_lr, _ = roc_curve(y_test, y_pred_lr)
+roc_auc_lr = auc(fpr_lr, tpr_lr)
+
+plt.figure()
+plt.plot(fpr_lr, tpr_lr, color='darkorange', lw=2, label=f'ROC curve of Logistic Regression(area = {lr_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Random Forest')
+plt.legend(loc="lower right")
+plt.show()
+
+# KNN
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score , classification_report
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+model_knn = KNeighborsClassifier(n_neighbors=5)
+model_knn.fit(X_train, y_train)
+
+y_pred_knn = model_knn.predict(X_test)
+
+# Calculate metrics
+accuracy_knn = accuracy_score(y_test, y_pred_knn)
+precision_knn = precision_score(y_test, y_pred_knn, average='weighted')
+recall_knn = recall_score(y_test, y_pred_knn, average='weighted')
+knn_roc_auc = roc_auc_score(y_test, y_pred_knn)
+
+print(f"Accuracy: {accuracy_knn:.4f}")
+print(f"Precision: {precision_knn:.4f}")
+print(f"Recall: {recall_knn:.4f}")
+print(knn_roc_auc)
+fpr_knn, tpr_knn, _ = roc_curve(y_test, y_pred_knn)
+roc_auc_knn = auc(fpr_knn, tpr_knn)
+
+plt.figure()
+plt.plot(fpr_knn, tpr_knn, color='darkorange', lw=2, label=f'ROC curve of KNN(area = {knn_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of knn')
+plt.legend(loc="lower right")
+plt.show()
+
+# Naive Bayes
+from sklearn.naive_bayes import GaussianNB
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+model_nb = GaussianNB()
+model_nb.fit(X_train, y_train)
+
+y_pred_nb = model_nb.predict(X_test)
+
+# Calculate metrics
+accuracy_nb = accuracy_score(y_test, y_pred_nb)
+precision_nb = precision_score(y_test, y_pred_nb, average='weighted')
+recall_nb = recall_score(y_test, y_pred_nb, average='weighted')
+nb_roc_auc = roc_auc_score(y_test, y_pred_nb)
+
+print(f"Accuracy: {accuracy_nb:.4f}")
+print(f"Precision: {precision_nb:.4f}")
+print(f"Recall: {recall_nb:.4f}")
+print(nb_roc_auc)
+
+fpr_nb, tpr_nb, _ = roc_curve(y_test, y_pred_nb)
+roc_auc_nb = auc(fpr_nb, tpr_nb)
+
+plt.figure()
+plt.plot(fpr_nb, tpr_nb, color='darkorange', lw=2, label=f'ROC curve of KNN(area = {nb_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of knn')
+plt.legend(loc="lower right")
+plt.show()
+
+# Bagging
+from sklearn.ensemble import BaggingClassifier 
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+base_estimator = DecisionTreeClassifier()
+model_bagging = BaggingClassifier(base_estimator=base_estimator, n_estimators=50, random_state=42)
+
+model_bagging.fit(X_train, y_train)
+y_pred_bagging = model_bagging.predict(X_test)
+
+accuracy_bagging = accuracy_score(y_test, y_pred_bagging)
+precision_bagging = precision_score(y_test, y_pred_bagging, average='weighted')
+recall_bagging = recall_score(y_test, y_pred_bagging, average='weighted')
+f1_bagging = f1_score(y_test, y_pred_bagging, average='weighted')
+bagging_roc_auc = roc_auc_score(y_test, y_pred_bagging)
+
+print(f"Accuracy: {accuracy_bagging:.4f}")
+print(f"Precision: {precision_bagging:.4f}")
+print(f"Recall: {recall_bagging:.4f}")
+print(f"F1 Score: {f1_bagging:.4f}")
+print(bagging_roc_auc)
+
+fpr_bagging, tpr_bagging, _ = roc_curve(y_test, y_pred_bagging)
+roc_auc_bagging = auc(fpr_bagging, tpr_bagging)
+
+plt.figure()
+plt.plot(fpr_bagging, tpr_bagging, color='darkorange', lw=2, label=f'ROC curve of Bagging(area = {bagging_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Bagging')
+plt.legend(loc="lower right")
+plt.show()
+
+# Gradient Boosting Machine
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+
+model_gbm = GradientBoostingClassifier(n_estimators=100, learning_rate=1.0, max_depth=1, random_state=42)
+model_gbm.fit(X_train, y_train)
+
+y_pred_gbm = model_gbm.predict(X_test)
+
+
+accuracy_gbm = accuracy_score(y_test, y_pred_gbm)
+precision_gbm = precision_score(y_test, y_pred_gbm, average='weighted')
+recall_gbm = recall_score(y_test, y_pred_gbm, average='weighted')
+f1_gbm = f1_score(y_test, y_pred_gbm, average='weighted')
+gbm_roc_auc = roc_auc_score(y_test, y_pred_gbm)
+
+print(f"Accuracy: {accuracy_gbm:.4f}")
+print(f"Precision: {precision_gbm:.4f}")
+print(f"Recall: {recall_gbm:.4f}")
+print(f"F1 Score: {f1_gbm:.4f}")
+print(gbm_roc_auc)
+
+fpr_gbm, tpr_gbm, _ = roc_curve(y_test, y_pred_gbm)
+roc_auc_gbm = auc(fpr_gbm, tpr_gbm)
+
+plt.figure()
+plt.plot(fpr_gbm, tpr_gbm, color='darkorange', lw=2, label=f'ROC curve of Gradient Boosting Machine(area = {gbm_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Gradient Boosting Machine')
+plt.legend(loc="lower right")
+plt.show()
+
+# XGBOOST
+from xgboost import XGBClassifier
+
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+
+model_xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+model_xgb.fit(X_train, y_train)
+
+y_pred_xgb = model_xgb.predict(X_test)
+
+accuracy_xgb = accuracy_score(y_test, y_pred_xgb)
+precision_xgb = precision_score(y_test, y_pred_xgb, average='weighted')
+recall_xgb = recall_score(y_test, y_pred_xgb, average='weighted')
+f1_xgb = f1_score(y_test, y_pred_xgb, average='weighted')
+xgb_roc_auc = roc_auc_score(y_test, y_pred_xgb)
+
+print(f"Accuracy: {accuracy_xgb:.4f}")
+print(f"Precision: {precision_xgb:.4f}")
+print(f"Recall: {recall_xgb:.4f}")
+print(f"F1 Score: {f1_xgb:.4f}")
+print(xgb_roc_auc)
+
+fpr_xgb, tpr_xgb, _ = roc_curve(y_test, y_pred_xgb)
+roc_auc_xgb = auc(fpr_xgb, tpr_xgb)
+
+plt.figure()
+plt.plot(fpr_xgb, tpr_xgb, color='darkorange', lw=2, label=f'ROC curve of Extreme Gradient Boosting(area = {xgb_roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve of Extreme Gradient Boosting')
+plt.legend(loc="lower right")
+plt.show()
+
+# ROC AUC CURVE PLOT
+import numpy as np
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+
+
+y_pred_probas = {
+     'KNN': y_pred_knn,
+     'Naive Bayes': y_pred_nb,
+     'Decision Tree': y_pred_dt,
+     'Logistic Regression': y_pred_lr,
+     'Random Forest': y_pred_rf,
+     'Bagging': y_pred_bagging,
+     'AdaBoost': y_pred_best_adb,
+     'Gradient Boosting': y_pred_gbm,
+     'XGBoost': y_pred_xgb,
+     'LightGBM': y_pred_lgb
+ }
+
+for name, y_pred_proba in y_pred_probas.items(): 
+    if len(y_test) != len(y_pred_proba): 
+        raise ValueError(f"Inconsistent number of samples in {name}: {len(y_test)} in y_test vs {len(y_pred_proba)} in y_pred_proba")
+
+# Plot ROC curves
+fig, axs = plt.subplots(2, 5, figsize=(20, 10))
+fig.suptitle('ROC AUC Curves', fontsize=20)
+
+model_names = list(y_pred_probas.keys())
+for i, ax in enumerate(axs.flatten()):
+    model_name = model_names[i]
+    y_pred_proba = y_pred_probas[model_name]
+    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+
+    ax.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+    ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title(model_name)
+    ax.legend(loc="lower right")
+
+# First row title
+axs[0, 0].text(-1, 1.2, 'Machine Learning Models', size=15, weight='bold', ha='left')
+# Second row title
+axs[1, 0].text(-1, 1.2, 'Ensemble Methods', size=15, weight='bold', ha='left')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, BaggingClassifier, AdaBoostClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.datasets import load_iris
+from sklearn.metrics import roc_auc_score, roc_curve, auc
+import matplotlib.pyplot as plt
+
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+
+models = {
+    'KNN': KNeighborsClassifier(),
+    'Naive Bayes': GaussianNB(),
+    'Decision Tree': DecisionTreeClassifier(),
+    'Logistic Regression': LogisticRegression(max_iter=200),
+    'Random Forest': RandomForestClassifier(n_estimators=100),
+    'Bagging': BaggingClassifier(n_estimators=100, random_state=42),
+    'AdaBoost': AdaBoostClassifier(n_estimators=100, random_state=42),
+    'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+    'XGBoost': XGBClassifier(n_estimators=100, random_state=42),
+    'LightGBM': LGBMClassifier(n_estimators=100, random_state=42)
+}
+
+y_pred_probas = {}
+roc_aucs = {}
+
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred_proba = model.predict_proba(X_test)[:, 1]
+    y_pred_probas[name] = y_pred_proba
+    roc_auc = roc_auc_score(y_test, y_pred_proba)
+    roc_aucs[name] = roc_auc
+    print(f'{name} ROC AUC: {roc_auc:.2f}')
+
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+# Assuming models, y_test, and y_pred_probas are defined
+fig, axs = plt.subplots(2, 6, figsize=(20, 10))  # Adjusted for 6 subplots in the second row
+fig.suptitle('ROC AUC Curves', fontsize=20)
+
+model_names = list(models.keys())
+first_row_models = model_names[:4]  # First 4 models
+second_row_models = model_names[4:]  # Remaining models, including Random Forest
+
+# Plot for the first row (4 models)
+for i, model_name in enumerate(first_row_models):
+    ax = axs[0, i]
+    y_pred_proba = y_pred_probas[model_name]
+    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+
+    ax.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC AUC = {roc_auc:.2f}')
+    ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title(model_name)
+    ax.legend(loc="lower right")
+
+# Disable empty axes in the first row
+for i in range(4, 6):
+    axs[0, i].axis('off')
+
+# Plot for the second row (6 models)
+for i, model_name in enumerate(second_row_models):
+    ax = axs[1, i]
+    y_pred_proba = y_pred_probas[model_name]
+    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+
+    ax.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC AUC = {roc_auc:.2f}')
+    ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title(model_name)
+    ax.legend(loc="lower right")
+
+# Adding titles for rows
+axs[0, 0].annotate("Machine Learning Models", xy=(-1.2, 1.4), xycoords="axes fraction", fontsize=15, weight='bold', ha='left')
+axs[1, 0].annotate("Ensemble Methods", xy=(-1.2, 1.4), xycoords="axes fraction", fontsize=15, weight='bold', ha='left')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.savefig('revised_roc_auc_curves.png')
+plt.show()
+
+
+# Stacked Generalization
+
+from sklearn.ensemble import StackingClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=42)
+
+import joblib
+
+base_learners = [
+    ('knn', KNeighborsClassifier()),
+    ('naive_bayes', GaussianNB()),
+    ('decision_tree', DecisionTreeClassifier()),
+    ('logistic_regression', LogisticRegression(max_iter=200)),
+    ('random_forest', RandomForestClassifier(n_estimators=100)),
+    ('adaboost', AdaBoostClassifier(n_estimators=100)),
+    ('xgboost', XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)),
+    ('gradient_boosting', GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)),
+    ('lightgbm', LGBMClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42))
+]
+
+final_estimator = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+stacking_clf = StackingClassifier(estimators=base_learners, final_estimator=final_estimator, passthrough=True)
+
+stacking_clf.fit(X_train, y_train)
+
+stacking_clf = joblib.load('/kaggle/input/stacked_model/scikitlearn/default/1/stacked_model.pkl')
+y_pred_stacked = stacking_clf.predict(X_test)
+
+
+accuracy_stacked = accuracy_score(y_test, y_pred_stacked)
+precision_stacked = precision_score(y_test, y_pred_stacked, average='weighted')
+recall_stacked = recall_score(y_test, y_pred_stacked, average='weighted')
+f1_stacked = f1_score(y_test, y_pred_stacked, average='weighted')
+
+print(f"Accuracy: {accuracy_stacked:.4f}")
+print(f"Precision: {precision_stacked:.4f}")
+print(f"Recall: {recall_stacked:.4f}")
+print(f"F1 Score: {f1_stacked:.4f}")
+
+
+
+
+import shap
+
+
+explainer_stacked = shap.KernelExplainer(stacking_clf.predict, X_train, link="logit")
+
+# Calculate SHAP values for the test set
+shap_values_stacked = explainer_stacked.shap_values(X_test, nsamples=100)
+
+# Visualize the first prediction's explanation
+shap.initjs()
+shap.force_plot(explainer_stacked.expected_value, shap_values_stacked[0 ], X_test[0])
+
+# Summary plot
+shap.summary_plot(shap_values_stacked, X_test)
+
+
